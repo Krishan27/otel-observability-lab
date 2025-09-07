@@ -1,3 +1,5 @@
 env: dev
 replicaCount: 1
 tailsampling: false
+resiliency:
+  otlp_fail_exporter: true

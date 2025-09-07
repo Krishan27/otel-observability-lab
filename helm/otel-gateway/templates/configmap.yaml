@@ -6,7 +6,9 @@ data:
   collector.yaml: |
     receivers:
       otlp:
-        protocols: { grpc: {}, http: {} }
+        protocols:
+          grpc: {}
+          http: {}
 
     processors:
       attributes:
@@ -14,36 +16,44 @@ data:
           - key: deployment.environment
             action: upsert
             value: {{ .Values.env }}
-      transform:
-        error_mode: ignore
-{{- if .Values.tailsampling }}
-      tailsampling:
-        decision_wait: 5s
-        policies:
-          - name: errors-only
-            type: status_code
-            status_code: { status_codes: [ERROR] }
-          - name: slow-traces
-            type: latency
-            latency: { threshold_ms: 500 }
-{{- end }}
       batch: {}
-      memory_limiter: { check_interval: 1s, limit_mib: 400 }
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 400
 
     exporters:
-      debug: { verbosity: detailed }
+      debug:
+        verbosity: detailed
+{{- if .Values.resiliency.otlp_fail_exporter }}
+      otlp/fail:
+        endpoint: http://blackhole:4318
+        tls:
+          insecure: true
+        sending_queue:
+          enabled: true
+          num_consumers: 2
+          queue_size: 1024
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_elapsed_time: 0s   # 0 = retry forever
+{{- end }}
 
     service:
+      telemetry:
+        metrics:
+          address: ":8888"
       pipelines:
         traces:
           receivers: [otlp]
-          processors: [attributes, transform{{ if .Values.tailsampling }}, tailsampling{{ end }}, batch, memory_limiter]
-          exporters: [debug]
+          processors: [attributes, batch, memory_limiter]
+          exporters: [debug{{ if .Values.resiliency.otlp_fail_exporter }}, otlp/fail{{ end }}]
         metrics:
           receivers: [otlp]
           processors: [attributes, batch, memory_limiter]
-          exporters: [debug]
+          exporters: [debug{{ if .Values.resiliency.otlp_fail_exporter }}, otlp/fail{{ end }}]
         logs:
           receivers: [otlp]
-          processors: [attributes, transform, batch, memory_limiter]
-          exporters: [debug]
+          processors: [attributes, batch, memory_limiter]
+          exporters: [debug{{ if .Values.resiliency.otlp_fail_exporter }}, otlp/fail{{ end }}]
