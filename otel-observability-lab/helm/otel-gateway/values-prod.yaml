@@ -1,0 +1,6 @@
+env: prod
+replicaCount: 3
+resources:
+  requests: { cpu: "300m", memory: "512Mi" }
+  limits:   { cpu: "2",    memory: "1Gi" }
+tailsampling: true

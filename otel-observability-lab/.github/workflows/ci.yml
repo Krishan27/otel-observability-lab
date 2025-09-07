@@ -1,0 +1,108 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: otel-observability-lab-api
+  REGISTRY: ghcr.io
+  # Helm will render the app chart using this repo & tag
+  HELM_IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/otel-observability-lab-api
+
+jobs:
+  build-test-lint-template:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------- Python tests ----------
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps for tests
+        working-directory: services/api
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest httpx==0.27.0
+
+      - name: Run tests
+        working-directory: services/api
+        run: pytest -q
+
+      # ---------- Build & push image to GHCR ----------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+            type=raw,value=pr-${{ github.event.pull_request.number }},enable=${{ github.event_name == 'pull_request' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/api
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Pick image tag for Helm renders
+        id: picktag
+        run: |
+          # prefer the git SHA tag (always exists)
+          TAG="$(echo "${{ steps.meta.outputs.tags }}" | tr ' ' '\n' | grep ':' | grep sha256 -v | head -n1 | cut -d: -f2)"
+          echo "TAG=${TAG}" >> $GITHUB_OUTPUT
+
+      # ---------- Helm lint & render (no cluster) ----------
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.2
+
+      - name: Helm lint (both charts)
+        run: |
+          helm lint ./helm/api
+          helm lint ./helm/otel-gateway
+
+      - name: Render app chart with built image
+        run: |
+          helm template api ./helm/api \
+            --set image.repository=${{ env.HELM_IMAGE_REPO }} \
+            --set image.tag=${{ steps.picktag.outputs.TAG }} \
+            -f ./helm/api/values-dev.yaml > rendered-api.yaml
+
+      - name: Render gateway (dev + prod)
+        run: |
+          helm template otel-gateway-dev  ./helm/otel-gateway -f ./helm/otel-gateway/values-dev.yaml  > rendered-gateway-dev.yaml
+          helm template otel-gateway-prod ./helm/otel-gateway -f ./helm/otel-gateway/values-prod.yaml > rendered-gateway-prod.yaml
+
+      - name: Upload rendered manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-manifests
+          path: |
+            rendered-api.yaml
+            rendered-gateway-dev.yaml
+            rendered-gateway-prod.yaml

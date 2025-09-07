@@ -1,0 +1,11 @@
+image:
+  tag: "prod"
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "1"
+    memory: "512Mi"
+env:
+  OTEL_COLLECTOR_HOST: "otel-gateway"

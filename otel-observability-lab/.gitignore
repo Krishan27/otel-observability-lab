@@ -1,0 +1,45 @@
+# OS / Editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Tests / Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+
+# Logs
+*.log
+logs/
+
+# Docker
+docker-compose.override.yml
+
+# Helm (local outputs / packages)
+charts/            # created by `helm dependency build`
+Chart.lock
+*.tgz              # `helm package` output
+values-*.local.yaml
+rendered-*.yaml    # local `helm template` outputs
+
+# Kube (local configs)
+kubeconfig
+*.kubeconfig
+*.kubecfg
+*.kube

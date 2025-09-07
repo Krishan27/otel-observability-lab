@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-gateway-config
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols: { grpc: {}, http: {} }
+
+    processors:
+      attributes:
+        actions:
+          - key: deployment.environment
+            action: upsert
+            value: {{ .Values.env }}
+      transform:
+        error_mode: ignore
+{{- if .Values.tailsampling }}
+      tailsampling:
+        decision_wait: 5s
+        policies:
+          - name: errors-only
+            type: status_code
+            status_code: { status_codes: [ERROR] }
+          - name: slow-traces
+            type: latency
+            latency: { threshold_ms: 500 }
+{{- end }}
+      batch: {}
+      memory_limiter: { check_interval: 1s, limit_mib: 400 }
+
+    exporters:
+      debug: { verbosity: detailed }
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [attributes, transform{{ if .Values.tailsampling }}, tailsampling{{ end }}, batch, memory_limiter]
+          exporters: [debug]
+        metrics:
+          receivers: [otlp]
+          processors: [attributes, batch, memory_limiter]
+          exporters: [debug]
+        logs:
+          receivers: [otlp]
+          processors: [attributes, transform, batch, memory_limiter]
+          exporters: [debug]
