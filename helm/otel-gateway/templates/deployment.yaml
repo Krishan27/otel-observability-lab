@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-gateway
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy: { type: RollingUpdate }
+  selector:
+    matchLabels: { app: otel-gateway }
+  template:
+    metadata:
+      labels: { app: otel-gateway }
+      annotations:
+        # simple checksum to force rollout on config-affecting values
+        checksum/config: "{{ .Values.env }}-{{ .Values.tailsampling }}"
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: otelcol
+          image: {{ .Values.image }}
+          args: ["--config=/etc/otelcol/collector.yaml"]
+          ports:
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4318 }
+            - { name: health,    containerPort: 13133 }
+          readinessProbe: { httpGet: { path: /health, port: health }, initialDelaySeconds: 5 }
+          livenessProbe:  { httpGet: { path: /health, port: health }, initialDelaySeconds: 10 }
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+          volumeMounts:
+            - { name: conf, mountPath: /etc/otelcol }
+      volumes:
+        - name: conf
+          configMap:
+            name: otel-gateway-config

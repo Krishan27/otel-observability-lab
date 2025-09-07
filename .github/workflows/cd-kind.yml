@@ -1,0 +1,100 @@
+name: cd-kind
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-kind-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NS: o11y
+  IMAGE_REPO: api
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  deploy-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.2
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.6
+
+      - name: Create Kind cluster
+        uses: helm/kind-action@v1.8.0
+        with:
+          cluster_name: otel-lab
+
+      - name: Create namespace
+        run: kubectl create ns $NS || true
+
+      # Build the app image and load it into Kind so the cluster can pull it locally
+      - name: Build API image
+        run: docker build -t $IMAGE_REPO:$IMAGE_TAG ./services/api
+
+      - name: Load image into Kind
+        run: kind load docker-image $IMAGE_REPO:$IMAGE_TAG --name otel-lab
+
+      # Deploy Collector (dev values → debug exporter)
+      - name: Deploy otel-gateway
+        run: |
+          helm upgrade --install otel-gateway ./helm/otel-gateway \
+            -n $NS \
+            -f ./helm/otel-gateway/values-dev.yaml
+          kubectl -n $NS rollout status deploy/otel-gateway --timeout=120s
+
+      # Deploy API using the locally loaded image name/tag
+      - name: Deploy API
+        run: |
+          helm upgrade --install api ./helm/api \
+            -n $NS \
+            -f ./helm/api/values-dev.yaml \
+            --set image.repository=$IMAGE_REPO \
+            --set image.tag=$IMAGE_TAG
+          kubectl -n $NS rollout status deploy/api --timeout=120s
+          kubectl -n $NS get pods -o wide
+
+      # Smoke test from inside the cluster (no port-forward needed)
+      - name: Smoke test /health
+        run: |
+          kubectl -n $NS run curl --image=curlimages/curl:8.7.1 --restart=Never --rm -i -- \
+            curl -sS -f http://api:8001/health
+
+      - name: Exercise /work
+        run: |
+          kubectl -n $NS run curl2 --image=curlimages/curl:8.7.1 --restart=Never --rm -i -- \
+            curl -sS "http://api:8001/work?ms=350"
+
+      # Collect logs/artifacts for review
+      - name: Save collector logs
+        run: kubectl -n $NS logs -l app=otel-gateway --tail=2000 > collector.log || true
+
+      - name: Save k8s state
+        run: |
+          kubectl -n $NS get all -o wide > k8s-state.txt
+          kubectl -n $NS describe deploy/api > describe-api.txt
+          kubectl -n $NS describe deploy/otel-gateway > describe-gateway.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kind-smoke-logs
+          path: |
+            collector.log
+            k8s-state.txt
+            describe-api.txt
+            describe-gateway.txt

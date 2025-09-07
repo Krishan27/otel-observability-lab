@@ -1,0 +1,50 @@
+apiVersion: apps/v1                # Use the apps/v1 version of the Kubernetes API for Deployments
+kind: Deployment                   # This resource is a Deployment (manages pods)
+metadata:
+  name: api                        # The name of this Deployment is "api"
+spec:
+  replicas: 1                      # Run 1 copy (pod) of this application
+  selector:
+    matchLabels: { app: api }      # Select pods with the label "app: api"
+  template:
+    metadata:
+      labels: { app: api }         # Pods created by this deployment will have the label "app: api"
+    spec:
+      containers:
+        - name: api               # The container inside the pod is named "api"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"   # Docker image to use, set by Helm values
+          imagePullPolicy: {{ .Values.image.pullPolicy }}                  # When to pull the image (e.g., IfNotPresent)
+          command: ["sh","-c"]    # Start the container with a shell command
+          args:
+            - >-                  # The actual command to run inside the container:
+              opentelemetry-instrument
+              uvicorn app.main:app --host 0.0.0.0 --port {{ .Values.service.port }}
+                                  # This starts your FastAPI app with OpenTelemetry instrumentation
+          env:                    # Environment variables for the app (used for OpenTelemetry config)
+            - name: OTEL_SERVICE_NAME
+              value: "{{ .Values.env.SERVICE_NAME }}"                      # Name for telemetry data
+            - name: OTEL_PROPAGATORS
+              value: "tracecontext,baggage"                                # Context propagation formats
+            - name: OTEL_TRACES_EXPORTER
+              value: "otlp"                                                # Export traces using OTLP
+            - name: OTEL_LOGS_EXPORTER
+              value: "otlp"                                                # Export logs using OTLP
+            - name: OTEL_METRICS_EXPORTER
+              value: "otlp"                                                # Export metrics using OTLP
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://{{ .Values.env.OTEL_COLLECTOR_HOST }}:4318"   # Where to send telemetry (collector address)
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: "{{ .Values.env.OTEL_EXPORTER_OTLP_PROTOCOL }}"       # Use HTTP/protobuf for OTLP
+            - name: OTEL_PYTHON_LOG_CORRELATION
+              value: "true"                                                # Enable log correlation with traces
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}                    # Expose this port inside the container (e.g., 8001)
+          readinessProbe:           # Kubernetes checks this endpoint to know if the app is ready to receive traffic
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 3  # Wait 3 seconds before starting readiness checks
+          livenessProbe:            # Kubernetes checks this endpoint to know if the app is still alive
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 5  # Wait 5 seconds before starting liveness checks
+          resources:
+{{ toYaml .Values.resources | indent 12 }} # Resource requests and limits (CPU/memory), set by Helm values

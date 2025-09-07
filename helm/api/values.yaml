@@ -1,0 +1,22 @@
+image:
+  repository: otel-observability-lab-api
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  port: 8001
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "256Mi"
+
+env:
+  SERVICE_NAME: "api"
+  # name of the Collector service in-cluster
+  OTEL_COLLECTOR_HOST: "otel-gateway"
+  # use OTLP/HTTP for simplicity
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"

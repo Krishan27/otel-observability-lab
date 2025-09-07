@@ -1,0 +1,4 @@
+image:
+  tag: "dev"
+env:
+  OTEL_COLLECTOR_HOST: "otel-gateway"

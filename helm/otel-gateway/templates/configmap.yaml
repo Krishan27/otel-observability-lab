@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-gateway-config
+data:
+  collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: {}
+          http: {}
+
+    processors:
+      attributes:
+        actions:
+          - key: deployment.environment
+            action: upsert
+            value: {{ .Values.env }}
+      batch: {}
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 400
+
+    exporters:
+      debug:
+        verbosity: detailed
+{{- if .Values.resiliency.otlp_fail_exporter }}
+      otlp/fail:
+        endpoint: http://blackhole:4318
+        tls:
+          insecure: true
+        sending_queue:
+          enabled: true
+          num_consumers: 2
+          queue_size: 1024
+        retry_on_failure:
+          enabled: true
+          initial_interval: 1s
+          max_interval: 30s
+          max_elapsed_time: 0s   # 0 = retry forever
+{{- end }}
+
+    service:
+      telemetry:
+        metrics:
+          address: ":8888"
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [attributes, batch, memory_limiter]
+          exporters: [debug{{ if .Values.resiliency.otlp_fail_exporter }}, otlp/fail{{ end }}]
+        metrics:
+          receivers: [otlp]
+          processors: [attributes, batch, memory_limiter]
+          exporters: [debug{{ if .Values.resiliency.otlp_fail_exporter }}, otlp/fail{{ end }}]
+        logs:
+          receivers: [otlp]
+          processors: [attributes, batch, memory_limiter]
+          exporters: [debug{{ if .Values.resiliency.otlp_fail_exporter }}, otlp/fail{{ end }}]
